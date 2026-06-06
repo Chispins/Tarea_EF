@@ -45,6 +45,50 @@ def dibujar_grafico_ipc(fechas, serie):
     plt.show()
 
 
+def plot_autocorrelograma(autocov, varianza):
+    """
+    Dibuja el autocorrelograma a partir de las autocovarianzas.
+
+    Parámetros:
+    autocov (dict): Diccionario con rezagos como llaves y autocovarianzas como valores
+    varianza (float): Varianza de la serie (para normalizar)
+    """
+    autocorr = {}
+    j = 0
+
+    for element in autocov.values():
+        autocorr[j] = element / varianza
+        j += 1
+
+    # Autocorrelograma
+    plt.plot(autocorr.keys(), autocorr.values())
+    plt.xlabel('Rezago')
+    plt.ylabel('Autocorrelación')
+    plt.title('Autocorrelograma')
+    plt.axhline(y=0, color='black', linewidth=0.5)
+    plt.show()
+
+
+def plot_autocorrelograma_parcial(valores_pacf):
+    """
+    Función exclusiva para graficar la autocorrelación parcial (PACF).
+    Recibe un array o lista con los valores ya calculados.
+    """
+    plt.figure(figsize=(10, 5))
+
+    # Grafica las líneas verticales típicas de la PACF
+    plt.stem(range(len(valores_pacf)), valores_pacf)
+
+    # Línea de referencia en cero
+    plt.axhline(0, color='red', linestyle='--', linewidth=1)
+
+    # Detalles estéticos
+    plt.title(f"Autocorrelograma Parcial (PACF) - Hasta Rezago {len(valores_pacf) - 1}")
+    plt.xlabel("Rezago")
+    plt.ylabel("Autocorrelación Parcial")
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
 ipc_data = pd.read_excel("PEM_VAR_IPC_2023.xlsx")
 fechas = ipc_data.iloc[1, 3:]
 ipc_data.columns = ipc_data.iloc[1, :]
@@ -71,9 +115,7 @@ autocov = {}
 for i in range(1, len(serie)):
     autocov[i] = np.mean((serie[i:] - mu) * (serie[:-i] - mu))
 
-plt.plot(autocov.keys(), autocov.values())
-plt.show()
-
+plot_autocorrelograma(autocov, varianza)
 j = 1
 autocorr = {}
 
@@ -84,18 +126,20 @@ for element in autocov.values():
 plt.plot(autocorr.keys(), autocorr.values())
 plt.show()
 
-sorted(autocorr.items(), key=lambda x: x[1], reverse=True)
+#sorted(autocorr.items(), key=lambda x: x[1], reverse=True)
 #Autocorrelaciones parciales
 np_autocorr = np.array([i for i in autocorr.values()])
 
 
 rho = np.insert(np_autocorr, 0, 1)
-pacf = np.zeros(len(rho))
+max_lags = 40
+pacf = np.zeros(max_lags+1)
 pacf[0] = 1
 pacf[1] = np_autocorr[0]
 
+plot_autocorrelograma_parcial(pacf)
 
-for k in range(2, len(rho)):
+for k in range(2, max_lags + 1):
     R = np.array([[rho[abs(i-j)] for j in range(k)] for i in range(k)])
     r = rho[1:k+1]
     phi = np.linalg.solve(R, r)
@@ -169,3 +213,62 @@ for (p, q), res in modelos.items():
         'HQC': -2 * ll / n + 2 * np.log(np.log(n)) * k / n
     }
 
+print(f"{'Modelo':<12} {'AIC':<10} {'BIC':<10} {'HQC':<10}")
+print("-" * 42)
+for q in range(1, 7):
+    if (1, q) in criterios:
+        print(f"ARMA(1,{q})   {criterios[(1,q)]['AIC']:<10.4f} {criterios[(1,q)]['BIC']:<10.4f} {criterios[(1,q)]['HQC']:<10.4f}")
+
+# Modelo escogido es (1,5)
+#D
+res_15 = modelos[(1,5)]
+c_est   = res_15.x[0]
+phi_est = res_15.x[1]
+theta_est = res_15.x[2:7]
+sigma2_est = res_15.x[7]
+
+m = max(1, 5+1)
+F = np.zeros((m, m))
+F[0, 0] = phi_est
+for i in range(1, m):
+    F[i-1, i] = 1
+
+G = np.zeros((m, m))
+G[0, 0] = 1
+for i in range(1, m):
+    G[i, 0] = theta_est[i-1]
+
+eigenvalues, V = np.linalg.eig(F)
+D = np.diag(eigenvalues)
+
+
+
+#IRF 20 periodos
+H = 20
+irf = np.zeros(H)
+alpha = G.copy()
+for h in range(H):
+    irf[h] = alpha[0,0]
+    alpha = F @ alpha
+
+#g
+phi_arr = np.array([phi_est]) if np.isscalar(phi_est) else phi_est
+theta_arr = theta_est.flatten() if theta_est.ndim > 1 else theta_est
+
+eps_last = residuos_calc(serie, c_est, phi_arr, theta_arr)
+n = len(serie) #DRY
+
+alpha_t = np.zeros((m, 1))
+alpha_t[0, 0] = serie[-1]
+for i in range(1, m):
+    alpha_t[i, 0] = theta_arr[i-1] * eps_last[-1]
+H = 8
+proyecciones = np.zeros(H)
+alpha = alpha_t.copy()
+for h in range(H):
+    alpha = c_est * G + F @ alpha
+    proyecciones[h] = alpha[0, 0]
+
+mayo  = proyecciones[0]
+junio = proyecciones[1]
+dic   = proyecciones[7]
