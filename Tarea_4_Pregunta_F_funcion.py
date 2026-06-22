@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 
 filename = r"bbdd_Tarea_4.xlsx"
 data = pd.read_excel(filename)
-# Nota: Las tablas de los resultados que se utilizaron al final del desarollo fueron realizados con IA
+# Nota: Las tablas de los resultados que se utilizaron al final del desarollo y en el informe fueron realizados con IA
 
 def estimar_chow_activo(data, columna, umbral=0):
     activo = data.iloc[1:, columna]
